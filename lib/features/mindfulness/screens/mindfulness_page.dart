@@ -274,7 +274,7 @@ class _MindfulnessPageState extends State<MindfulnessPage>
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 20),
                           child: Text(
-                            'Guided Meditation Sessions 🎧',
+                            'Guided Meditation Sessions',
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,

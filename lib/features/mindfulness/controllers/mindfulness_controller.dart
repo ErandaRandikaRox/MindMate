@@ -299,18 +299,81 @@ class MindfulnessController extends ChangeNotifier {
         return;
       }
       // Unrecognised command while paused – prompt user
-      await tts.speak('Session is paused. Say continue to resume, or stop to close the meditation.');
+      chatHistory.add(MindfulnessMessage("I didn't catch that. Say continue to resume, or stop to close the meditation.", isUser: false));
+      statusLabel = 'Waiting for input';
+      notifyListeners();
+      await tts.speak("I didn't catch that. Say continue to resume, or stop to close the meditation.");
       return;
     }
 
-    // 1. Crisis / Self-Harm detection (always first, always highest priority)
-    final callKey = CrisisDetector.detectCallIntent(text);
-    if (callKey != null || CrisisDetector.isCrisis(text)) {
+    // 1. TRUE CRISIS (self-harm, suicide) MUST ALWAYS BE FIRST.
+    if (CrisisDetector.isCrisis(text)) {
       statusLabel = 'Redirecting to Emergency Support…';
       notifyListeners();
       const msg =
           'I hear how much pain you are in, and I want you to be safe. '
           'I am redirecting you to our emergency support page immediately. Please connect with a professional. You are not alone.';
+      chatHistory.add(MindfulnessMessage(msg, isUser: false));
+      await tts.speak(msg);
+      if (_context != null && _context!.mounted) {
+        Navigator.push(
+          _context!,
+          MaterialPageRoute(builder: (_) => EmergencySupportPage(initialCallKey: 'unknown')),
+        );
+      }
+      return;
+    }
+
+    // 1b. Catch psychoeducation questions about depression, anxiety, and stress robustly
+    // This uses a generic question check so variations like "what's depression" are caught
+    final isAskingQuestion = text.contains('what') || 
+                             text.contains('how') || 
+                             text.contains('explain') || 
+                             text.contains('tell') || 
+                             text.contains('help') || 
+                             text.contains('about');
+
+    if (text.contains('depression') && isAskingQuestion) {
+      currentState = 'awaiting_session_confirmation';
+      recommendedSession = 'beginner';
+      notifyListeners();
+      await speakConversationalResponse(
+        'Depression can feel like a heavy weight causing sadness. '
+        'Please know you are not alone. '
+        'Would you like to try our Beginner Meditation for comfort?',
+      );
+      return;
+    }
+    if (text.contains('anxiety') && isAskingQuestion) {
+      currentState = 'awaiting_session_confirmation';
+      recommendedSession = 'beginner';
+      notifyListeners();
+      await speakConversationalResponse(
+        'Anxiety is a natural response to stress. '
+        'Taking slow breaths can help. '
+        'Would you like to try our Beginner Meditation?',
+      );
+      return;
+    }
+    if (text.contains('stress') && isAskingQuestion) {
+      currentState = 'awaiting_session_confirmation';
+      recommendedSession = 'mindful_observation';
+      notifyListeners();
+      await speakConversationalResponse(
+        'Stress is how your body responds to daily pressures. '
+        'Mindful Observation can help relax your muscles. '
+        'Would you like me to start the Mindful Observation session?',
+      );
+      return;
+    }
+
+    // 1c. Generic Call Intent / Help / Mental Health mentions (that are NOT questions)
+    final callKey = CrisisDetector.detectCallIntent(text);
+    if (callKey != null) {
+      statusLabel = 'Redirecting to Emergency Support…';
+      notifyListeners();
+      const msg =
+          'I am redirecting you to our emergency support page. Please connect with a professional. You are not alone.';
       chatHistory.add(MindfulnessMessage(msg, isUser: false));
       await tts.speak(msg);
       if (_context != null && _context!.mounted) {
@@ -413,31 +476,7 @@ class MindfulnessController extends ChangeNotifier {
       );
       return;
     }
-    if (text.contains('what is anxiety') || text.contains('how to manage anxiety') || text.contains('help with anxiety')) {
-      await speakConversationalResponse(
-        'Anxiety is a natural response to stress, but it can feel overwhelming. '
-        'You can manage it by taking slow, deep breaths, grounding yourself in the present, or doing our Beginner Meditation. '
-        'Would you like me to start the Beginner Meditation for you now?',
-      );
-      return;
-    }
-    if (text.contains('what is stress') || text.contains('how to manage stress') || text.contains('help with stress')) {
-      await speakConversationalResponse(
-        'Stress is how your body responds to daily challenges and pressures. '
-        'You can manage it by setting boundaries, taking deep breaths, and using a Mindful Observation session or breathing exercises to relax your muscles. '
-        'Would you like to try a meditation session now, or ask something else?',
-      );
-      return;
-    }
-    if (text.contains('what is depression') || text.contains('help with depression') || text.contains('explain depression')) {
-      await speakConversationalResponse(
-        'Depression is a common mental health challenge that can feel like a heavy weight, causing sadness or loss of interest. '
-        'Please know that you are not alone, and speaking to a professional or a loved one is a courageous first step. '
-        'We also have a Loving Kindness meditation for comfort, or I can guide you to our Emergency Support page. '
-        'Would you like to view our Emergency contacts, or start a meditation?',
-      );
-      return;
-    }
+
     if (text.contains('what can i say') || text.contains('features') || text.contains('how does this work') || text.contains('help')) {
       await speakConversationalResponse(
         'You can say, "Start Loving Kindness", "Start Focus", "Start Gratitude", "Start Mindful Observation", or "Start Beginner Meditation". '
@@ -494,16 +533,24 @@ class MindfulnessController extends ChangeNotifier {
         currentState = 'idle';
         await _startRecommendedSession();
       } else if (isNo) {
-        currentState = 'idle';
-        recommendedSession = '';
-        notifyListeners();
-        final allTitles = [
-          ...kMindfulnessSessions.map((s) => s['title'] as String),
-          ...kGuidedMeditationSessions.map((s) => s['title'] as String),
-        ].join(', ');
-        await speakConversationalResponse(
-          'That is completely fine. Available sessions are: $allTitles. Which one would you like to try?',
-        );
+        if (recommendedSession != 'focus_concentration' && recommendedSession != '') {
+          recommendedSession = 'focus_concentration';
+          notifyListeners();
+          await speakConversationalResponse(
+            'That is completely fine. Would you like to try the Focus session instead?',
+          );
+        } else {
+          currentState = 'idle';
+          recommendedSession = '';
+          notifyListeners();
+          final allTitles = [
+            ...kMindfulnessSessions.map((s) => s['title'] as String),
+            ...kGuidedMeditationSessions.map((s) => s['title'] as String),
+          ].join(', ');
+          await speakConversationalResponse(
+            'That is completely fine. Available sessions are: $allTitles. Which one would you like to try?',
+          );
+        }
       } else {
         await speakConversationalResponse(
           'Just say yes to start the session, or no if you would prefer not to right now.',
